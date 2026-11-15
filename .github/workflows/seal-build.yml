@@ -1,0 +1,73 @@
+name: seal-build
+
+# Build-and-pack only: the test suite runs on Travis (.travis.yml).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Compile the package (GOPATH layout, as the module predates go.mod)
+        env:
+          GO111MODULE: 'off'
+          GOPATH: ${{ runner.temp }}/gopath
+        run: |
+          mkdir -p "$GOPATH/src/github.com/Masterminds"
+          cp -r src "$GOPATH/src/github.com/Masterminds/goutils"
+          rm -rf "$GOPATH/src/github.com/Masterminds/goutils/.git"
+          cd "$GOPATH/src/github.com/Masterminds/goutils"
+          go build ./...
+
+      - name: Pack the module zip with golang.org/x/mod/zip.CreateFromDir
+        run: |
+          # Tree copy without this seal-only workflow (upstream ships no .github).
+          mkdir -p "$RUNNER_TEMP/modsrc" build_output
+          cp -r src/. "$RUNNER_TEMP/modsrc/"
+          rm -rf "$RUNNER_TEMP/modsrc/.git" "$RUNNER_TEMP/modsrc/.github"
+          mkdir -p "$RUNNER_TEMP/packer"
+          cd "$RUNNER_TEMP/packer"
+          cat > main.go <<'EOF'
+          package main
+
+          import (
+          	"log"
+          	"os"
+
+          	"golang.org/x/mod/module"
+          	"golang.org/x/mod/zip"
+          )
+
+          func main() {
+          	m := module.Version{Path: os.Args[1], Version: os.Args[2]}
+          	f, err := os.Create(os.Args[4])
+          	if err != nil {
+          		log.Fatal(err)
+          	}
+          	defer f.Close()
+          	if err := zip.CreateFromDir(f, m, os.Args[3]); err != nil {
+          		log.Fatal(err)
+          	}
+          	log.Printf("created module zip: %s", os.Args[4])
+          }
+          EOF
+          go mod init example.com/packer
+          go get golang.org/x/mod@v0.17.0
+          go run . github.com/Masterminds/goutils v1.1.0 "$RUNNER_TEMP/modsrc" "$GITHUB_WORKSPACE/build_output/v1.1.0.zip"
+          unzip -l "$GITHUB_WORKSPACE/build_output/v1.1.0.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module-zip
+          path: build_output/v1.1.0.zip
+          if-no-files-found: error

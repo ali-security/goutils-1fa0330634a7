@@ -1,10 +1,18 @@
 language: go
 
 go:
-  - 1.6
-  - 1.7
-  - 1.8
-  - tip
+  - 1.6.4
+  - 1.7.6
+  - 1.8.7
+  - 1.11.2
+
+# The current Travis image clones outside GOPATH; GOPATH-mode Go needs the
+# package at its import path, so copy it there and run from that copy.
+install:
+  - mkdir -p "$GOPATH/src/github.com/Masterminds"
+  - cp -r "$TRAVIS_BUILD_DIR" "$GOPATH/src/github.com/Masterminds/goutils"
+  - cd "$GOPATH/src/github.com/Masterminds/goutils"
+  - go get -v -t ./...
 
 script:
   - go test -v
